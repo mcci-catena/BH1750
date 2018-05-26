@@ -66,6 +66,12 @@ void BH1750::begin(uint8_t mode) {
   // Initialize I2C
   Wire.begin();
 
+  // power it up
+  this->configure(BH1750_POWER_ON);
+
+  // reset it
+  this->configure(BH1750_RESET);
+
   // Configure sensor in specified mode
   configure(mode);
 
@@ -79,37 +85,75 @@ void BH1750::begin(uint8_t mode) {
 void BH1750::configure(uint8_t mode) {
 
   // Check, is measurment mode exist
-  switch (mode) {
-
+  switch (mode) 
+        {
     case BH1750_CONTINUOUS_HIGH_RES_MODE:
     case BH1750_CONTINUOUS_HIGH_RES_MODE_2:
     case BH1750_CONTINUOUS_LOW_RES_MODE:
     case BH1750_ONE_TIME_HIGH_RES_MODE:
     case BH1750_ONE_TIME_HIGH_RES_MODE_2:
     case BH1750_ONE_TIME_LOW_RES_MODE:
-
-      // Send mode to sensor
-      Wire.beginTransmission(BH1750_I2CADDR);
-      __wire_write((uint8_t)mode);
-      Wire.endTransmission();
+    case BH1750_POWER_ON:
+    case BH1750_POWER_DOWN:
+            // Send mode to sensor
+      this->send(mode);
 
       // Wait few moments for waking up
-      _delay_ms(10);
+      if (this->m_mode == BH1750_POWER_DOWN)
+              _delay_ms(10);
       break;
+
+    case BH1750_RESET:
+        this->send(BH1750_POWER_ON);
+        _delay_ms(10);
+        this->send(mode);
+        this->m_mode = BH1750_POWER_ON;
+        break;
 
     default:
+        // Invalid measurement mode
+        #ifdef BH1750_DEBUG
+                Serial.println(F("BH1750: Invalid measurment mode"));
+        #endif
+        return;
+        }
 
-      // Invalid measurement mode
-      #ifdef BH1750_DEBUG
-        Serial.println(F("BH1750: Invalid measurment mode"));
-      #endif
+  // save mode and scaling value.
+  switch (mode)
+        {
+  case BH1750_ONE_TIME_LOW_RES_MODE:
+  case BH1750_CONTINUOUS_LOW_RES_MODE:
+        this->m_lux_scale_num = 10;
+        this->m_lux_scale_denom = 12;
+        this->m_mode = mode;
+        break;
 
-      break;
+  case BH1750_ONE_TIME_HIGH_RES_MODE:
+  case BH1750_CONTINUOUS_HIGH_RES_MODE:
+        this->m_lux_scale_num = 10;
+        this->m_lux_scale_denom = 12;
+        this->m_mode = mode;
+        break;
 
-  }
+  case BH1750_ONE_TIME_HIGH_RES_MODE_2:
+  case BH1750_CONTINUOUS_HIGH_RES_MODE_2:
+        this->m_lux_scale_num = 5;
+        this->m_lux_scale_denom = 12;
+        this->m_mode = mode;
+        break;
 
+  default:
+        this->m_mode = mode;
+        break;
+        }
 }
 
+void BH1750::send(uint8_t cmd) const
+        {
+        Wire.beginTransmission(BH1750_I2CADDR);
+        __wire_write(cmd);
+        Wire.endTransmission();
+        }
 
 /**
  * Read light level from sensor
@@ -130,19 +174,45 @@ uint16_t BH1750::readLightLevel(void) {
 
   // Send raw value if debug enabled
   #ifdef BH1750_DEBUG
-    Serial.print(F("[BH1750] Raw value: "));
-    Serial.println(level);
+    Serial.print(F("[BH1750] Raw value: 0x"));
+    Serial.println(level, HEX);
   #endif
 
+  uint32_t scale_level_num = uint32_t(level) * measurement_adj_num(this->m_uMeasAdj) + (measurement_adj_denom() >> 1);
+
   // Convert raw value to lux
-  level /= 1.2;
+  uint32_t level_num = scale_level_num * this->m_lux_scale_num + (this->m_lux_scale_denom >> 1);
+  
+  uint32_t level_result = level_num / (this->m_lux_scale_denom * measurement_adj_denom());
 
   // Send converted value, if debug enabled
   #ifdef BH1750_DEBUG
     Serial.print(F("[BH1750] Converted value: "));
-    Serial.println(level);
+    Serial.println(level_result);
   #endif
 
-  return level;
+  return level_result;
+  }
 
-}
+  bool BH1750::setMeasurementAdj(float adj)
+        {
+        if (adj > 4 || adj < 0.1)
+                return false;
+        uint8_t uAdjRaw = uint8_t(adj * BH1750_SENSITIVITY_TYP + 0.5);
+        return setMeasurementAdj(uAdjRaw);
+        }
+
+  bool BH1750::setMeasurementAdj(uint8_t uAdjRaw)
+        {
+        uint8_t uAdj = limit_measurement_adj(uAdjRaw);
+        if (uAdjRaw != uAdj)
+                return false;
+
+        this->m_uMeasAdj = uAdj;
+        if (this->m_mode == BH1750_POWER_DOWN)
+                this->configure(BH1750_POWER_ON);
+
+        this->send(measurement_command_hi(uAdj));
+        this->send(measurement_command_low(uAdj));
+        return true;
+        }
