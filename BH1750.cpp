@@ -85,7 +85,7 @@ void BH1750::begin(uint8_t mode) {
 void BH1750::configure(uint8_t mode) {
 
   // Check, is measurment mode exist
-  switch (mode) 
+  switch (mode)
         {
     case BH1750_CONTINUOUS_HIGH_RES_MODE:
     case BH1750_CONTINUOUS_HIGH_RES_MODE_2:
@@ -182,7 +182,7 @@ uint16_t BH1750::readLightLevel(void) {
 
   // Convert raw value to lux
   uint32_t level_num = scale_level_num * this->m_lux_scale_num + (this->m_lux_scale_denom >> 1);
-  
+
   uint32_t level_result = level_num / (this->m_lux_scale_denom * measurement_adj_denom());
 
   // Send converted value, if debug enabled
